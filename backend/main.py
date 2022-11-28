@@ -1,7 +1,13 @@
 from typing import List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy.orm import Session
+
+from db.engine import SessionLocal
+from services.game.exceptions import MoveIntegrityException
+from services.game.schemas import GameTile
+from services.game.service import play_move
 
 app = FastAPI()
 
@@ -43,6 +49,14 @@ html = """
 """
 
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -66,9 +80,22 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+@app.exception_handler(MoveIntegrityException)
+async def unicorn_exception_handler(request: Request, exc: MoveIntegrityException):
+    return JSONResponse(
+        status_code=400,
+        content={"message": exc.message, "details": exc.move.dict()},
+    )
+
+
 @app.get("/")
 async def get():
     return HTMLResponse(html)
+
+
+@app.get("/test")
+async def get_test(move: GameTile, db: Session = Depends(get_db)):
+    return play_move(db, move)
 
 
 @app.websocket("/ws/{client_id}")

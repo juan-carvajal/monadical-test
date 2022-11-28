@@ -2,6 +2,7 @@ version: '3'
 services: 
     postgres:
         image: postgres
+        container_name: database
         restart: always
         environment: 
             - DATABASE_HOST=127.0.0.1
@@ -12,7 +13,7 @@ services:
         ports: 
             - "5432:5432"
         volumes: 
-            - .scripts/docker_postgres_init.sql:/docker-entrypoint-initdb.d/docker_postgres_init.sql
+            - ./scripts/docker_postgres_init.sql:/docker-entrypoint-initdb.d/docker_postgres_init.sql
     
     pgadmin-compose:
         image: dpage/pgadmin4
@@ -20,6 +21,6 @@ services:
             PGADMIN_DEFAULT_EMAIL: "test@gmail.com"
             PGADMIN_DEFAULT_PASSWORD: "test123!"
         ports: 
-            - "16543:80"
+            - "80:80"
         depends_on: 
             - postgres  
