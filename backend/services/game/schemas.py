@@ -19,6 +19,8 @@ class Game(BaseModel):
     height: int
     line_target: int
     tiles: list[GameTile]
+    host: str
+    enemy: str | None
 
     class Config:
         orm_mode = True

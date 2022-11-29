@@ -1,10 +1,11 @@
 from sqlalchemy.orm import Session
-from services.game.exceptions import GameNotFound, MoveIntegrityException
+from services.game.exceptions import GameFullException, GameNotFound, MoveIntegrityException
 
 from services.game.models import Game, GameTile
-from services.game.schemas import GameTile as GTSchema
+from services.game.schemas import GameTile as GTSchema,Game as GameSchema
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import update
 
 from services.game.utils import check_grid
 
@@ -40,3 +41,21 @@ def play_move(db: Session, value: GTSchema):
         return check_win(db, value)
     except IntegrityError:
         raise MoveIntegrityException(value)
+
+def get_free_games(db: Session):
+    return db.query(Game).filter(Game.enemy is None).all()
+
+def create_game(db: Session, game_schema: GameSchema):
+    db_game = Game(host=game_schema.host,width=game_schema.width,height=game_schema.height,line_target=game_schema.line_target)
+    db.add(db_game)
+    db.commit()
+    db.refresh(db_game)
+    return db_game
+
+def register_for_game(db: Session,game_id:int, player_id: str):
+    game = get_game(db,game_id)
+    if (game is None):
+        raise GameNotFound(game_id)
+    if (game.enemy is not None):
+        raise GameFullException(game_id)
+    return db.execute(update(Game).where(Game.game_id == game_id).values(enemy=player_id).returning(Game)).first()

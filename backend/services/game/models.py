@@ -18,6 +18,8 @@ class Game(Base):
     width = Column(Integer, nullable=False, server_default=text("7"))
     height = Column(Integer, nullable=False, server_default=text("7"))
     line_target = Column(Integer, nullable=False, server_default=text("4"))
+    host = Column(Text, nullable=False)
+    enemy = Column(Text, nullable=True)
 
     tiles = relationship('GameTile', back_populates='game')
 
