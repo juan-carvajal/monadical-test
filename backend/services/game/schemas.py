@@ -14,12 +14,12 @@ class GameTile(BaseModel):
 
 
 class Game(BaseModel):
-    game_id: int
+    game_id: int | None
     width: int
     height: int
     line_target: int
-    tiles: list[GameTile]
-    host: str
+    tiles: list[GameTile] | None
+    host: str  | None
     enemy: str | None
 
     class Config:

@@ -1,13 +1,13 @@
 from typing import List
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from db.engine import SessionLocal
 from services.game.exceptions import MoveIntegrityException
 from services.game.schemas import GameTile, Game
-from services.game.service import create_game, get_free_games, play_move, register_for_game
+from services.game.service import create_game, get_free_games, play_move, register_for_game, manager
 from fastapi import (
     Depends,
     FastAPI,
@@ -17,44 +17,8 @@ from fastapi import (
     status,
 )
 
-app = FastAPI()
 
-html = """
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>Chat</title>
-    </head>
-    <body>
-        <h1>WebSocket Chat</h1>
-        <h2>Your ID: <span id="ws-id"></span></h2>
-        <form action="" onsubmit="sendMessage(event)">
-            <input type="text" id="messageText" autocomplete="off"/>
-            <button>Send</button>
-        </form>
-        <ul id='messages'>
-        </ul>
-        <script>
-            var client_id = Date.now()
-            document.querySelector("#ws-id").textContent = client_id;
-            var ws = new WebSocket(`ws://localhost:8000/ws/${client_id}`);
-            ws.onmessage = function(event) {
-                var messages = document.getElementById('messages')
-                var message = document.createElement('li')
-                var content = document.createTextNode(event.data)
-                message.appendChild(content)
-                messages.appendChild(message)
-            };
-            function sendMessage(event) {
-                var input = document.getElementById("messageText")
-                ws.send(input.value)
-                input.value = ''
-                event.preventDefault()
-            }
-        </script>
-    </body>
-</html>
-"""
+app = FastAPI()
 
 
 def get_db():
@@ -85,9 +49,6 @@ class ConnectionManager:
             await connection.send_text(message)
 
 
-manager = ConnectionManager()
-
-
 async def get_token_ws(
     token: str | None = Query(default=None),
 ):
@@ -112,11 +73,6 @@ async def unicorn_exception_handler(request: Request, exc: MoveIntegrityExceptio
     )
 
 
-@app.get("/")
-async def get():
-    return HTMLResponse(html)
-
-
 @app.get("/test")
 async def get_test(move: GameTile, db: Session = Depends(get_db)):
     return play_move(db, move)
@@ -125,7 +81,9 @@ async def get_test(move: GameTile, db: Session = Depends(get_db)):
 @app.post("/games")
 async def post_game(game: Game, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
     game.host = token
-    return create_game(db, game)
+    res = create_game(db, game)
+    await manager.register_game(res.game_id, token)
+    return res
 
 
 @app.get("/games")
@@ -135,24 +93,41 @@ async def get_game(db: Session = Depends(get_db), token: str = Depends(get_token
 
 @app.post("/games/{game_id}/membership")
 async def join_game(game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
-    return register_for_game(db, game_id, token)
+    row = register_for_game(db, game_id, token)
+    if(row is None):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"message": f"Could not join game"},
+        )
+    await manager.add_enemy_to_game(token, game_id)
+    return row
 
 
 @app.post("/games/{game_id}/moves")
 async def move_game(move: GameTile, game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
     move.value = token
     move.game_id = game_id
-    return play_move(db, move)
+    if(not manager.can_move(token, game_id)):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"message": f"Is not {token}'s turn"},
+        )
+    res = play_move(db, move)
+    if(res is None):
+        return None
+    turn = await manager.set_turn(game_id)
+    res["turn"] = turn
+    await manager.broadcast_game_update(res, game_id)
+    return res
 
 
 @app.websocket("/ws/{game_id}")
 async def websocket_endpoint(websocket: WebSocket, game_id: int, token: str = Depends(get_token_ws)):
-    await manager.connect(websocket)
     try:
-        while True:
-            data = await websocket.receive_text()
-            await manager.send_personal_message(f"You wrote: {data}", websocket)
-            await manager.broadcast(f"Client #{game_id} says: {data}")
+        connected = await manager.connect(token, game_id, websocket)
+        if (connected):
+            await websocket.receive_text()
+        else:
+            raise WebSocketException(code=status.WS_1006_ABNORMAL_CLOSURE)
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        await manager.broadcast(f"Client #{game_id} left the chat")
+        await manager.disconnect(token, game_id, websocket)
