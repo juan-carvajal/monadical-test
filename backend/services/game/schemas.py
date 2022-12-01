@@ -13,6 +13,9 @@ class GameTile(BaseModel):
     class Config:
         orm_mode = True
 
+class WSEvent(BaseModel):
+    type: str
+    payload: dict
 
 class Game(BaseModel):
     game_id: int | None

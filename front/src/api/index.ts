@@ -1,6 +1,6 @@
 import { useIdentityStore } from 'src/stores/id-store';
 import axios from 'axios'
-import { Game } from './models';
+import { Game, GameStreamData, PlayerMove } from './models';
 
 const identityStore = useIdentityStore()
 
@@ -18,6 +18,36 @@ export const getGames = () => {
     }
   }).then(resp => {
     return resp.data as Game[]
+  })
+}
+
+export const getGame = (id: number) => {
+  return axios.get(`${BACKEND_PATH}/games/${id}`, {
+    params: {
+      token: getSessionToken()
+    }
+  }).then(resp => {
+    return resp.data as Game
+  })
+}
+
+export const makeMove = (gameId: number, move: PlayerMove) => {
+  return axios.post(`${BACKEND_PATH}/games/${gameId}/moves`, move, {
+    params: {
+      token: getSessionToken()
+    }
+  }).then(resp => {
+    return resp.data as GameStreamData
+  })
+}
+
+export const joinGame = (gameId: number) => {
+  return axios.post(`${BACKEND_PATH}/games/${gameId}/membership`, {}, {
+    params: {
+      token: getSessionToken()
+    }
+  }).then(resp => {
+    return resp.data as Game
   })
 }
 

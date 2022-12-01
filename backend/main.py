@@ -1,3 +1,4 @@
+import json
 from typing import List
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -6,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from db.engine import SessionLocal
 from services.game.exceptions import MoveIntegrityException
-from services.game.schemas import GameTile, Game, PlayerMove
-from services.game.service import create_game, get_free_games, play_move, register_for_game, manager, map_move
+from services.game.schemas import GameTile, Game, PlayerMove, WSEvent
+from services.game.service import create_game, get_current_game_status, get_free_games, get_game, play_move, register_for_game, manager, map_move
 from fastapi import (
     Depends,
     FastAPI,
@@ -33,6 +34,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 def get_db():
     db = SessionLocal()
@@ -94,8 +96,13 @@ async def post_game(game: Game, db: Session = Depends(get_db), token: str = Depe
 
 
 @app.get("/games")
-async def get_game(db: Session = Depends(get_db), token: str = Depends(get_token_http)):
-    return get_free_games(db)
+async def get_games(db: Session = Depends(get_db), token: str = Depends(get_token_http)):
+    return get_free_games(db,token)
+
+
+@app.get("/games/{game_id}")
+async def get_game_handler(game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
+    return get_game(db, game_id)
 
 
 @app.post("/games/{game_id}/membership")
@@ -107,6 +114,8 @@ async def join_game(game_id: int, db: Session = Depends(get_db), token: str = De
             content={"message": f"Could not join game"},
         )
     await manager.add_enemy_to_game(token, game_id)
+    event = WSEvent(type="opponent", payload={"username": token})
+    await manager.broadcast_game_update(event.dict(), game_id)
     return row
 
 
@@ -117,25 +126,29 @@ async def move_game(move: PlayerMove, game_id: int, db: Session = Depends(get_db
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"message": f"Is not {token}'s turn"},
         )
-    res = play_move(db, move,game_id,token)
+    res = play_move(db, move, game_id, token)
     if(res is None):
         return None
     turn = await manager.set_turn(game_id)
     res["turn"] = turn
-    await manager.broadcast_game_update(res, game_id)
+    event = WSEvent(type="game", payload=res)
+    await manager.broadcast_game_update(event.dict(), game_id)
     return res
 
 
 @app.get("/games/{game_id}/valid-moves")
-def get_valid_moves_handler(game_id: int,move: PlayerMove, db: Session = Depends(get_db)):
-    return map_move(db,game_id,move)
+def get_valid_moves_handler(game_id: int, move: PlayerMove, db: Session = Depends(get_db)):
+    return map_move(db, game_id, move)
 
 
 @app.websocket("/ws/{game_id}")
-async def websocket_endpoint(websocket: WebSocket, game_id: int, token: str = Depends(get_token_ws)):
+async def websocket_endpoint(websocket: WebSocket, game_id: int, token: str = Depends(get_token_ws), db: Session = Depends(get_db)):
     try:
         connected = await manager.connect(token, game_id, websocket)
         if (connected):
+            current_state = await get_current_game_status(db, game_id)
+            event = WSEvent(type="game", payload=current_state)
+            await websocket.send_text(json.dumps(event.dict()))
             await websocket.receive_text()
         else:
             raise WebSocketException(code=status.WS_1006_ABNORMAL_CLOSURE)

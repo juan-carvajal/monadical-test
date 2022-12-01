@@ -13,12 +13,14 @@
 
         <q-toolbar-title> Stack game </q-toolbar-title>
 
-        <div>Logged as: {{ idStore.username }}</div>
+        <div>Logged in as: <span class="text-bold">{{ idStore.username }}</span></div>
       </q-toolbar>
     </q-header>
 
     <q-drawer v-model="leftDrawerOpen" show-if-above bordered>
-      <game-manager-vue></game-manager-vue>
+      <q-scroll-area class="fit"
+        ><game-manager-vue></game-manager-vue
+      ></q-scroll-area>
     </q-drawer>
 
     <q-page-container>

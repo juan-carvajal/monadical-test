@@ -1,10 +1,19 @@
 <template>
-  <q-btn-group spread outline>
-    <q-btn label="New game" color="primary" @click="createNewGame" />
-    <q-btn icon="update" color="primary" @click="refreshGames()" />
-  </q-btn-group>
-  <q-list bordered separator>
-    <q-item clickable v-ripple v-for="game in games" :key="game.game_id">
+  <div class="fixed-top z-top bg-white">
+    <q-btn-group spread outline class="q-ma-xs">
+      <q-btn label="New game" color="primary" @click="createNewGame" />
+      <q-btn icon="update" color="primary" @click="refreshGames()" />
+    </q-btn-group>
+  </div>
+
+  <q-list bordered separator Style="padding-top:44px">
+    <q-item
+      clickable
+      v-ripple
+      v-for="game in games"
+      @click="(e) => goToGame(game.game_id)"
+      :key="game.game_id"
+    >
       <q-item-section>
         <q-item-label>{{ game.host }}'s Game</q-item-label>
         <q-item-label caption>{{
@@ -31,6 +40,9 @@ export default defineComponent({
     this.refreshGames();
   },
   methods: {
+    goToGame(id?: number) {
+      this.$router.push(`/games/${id}`);
+    },
     refreshGames() {
       this.gamesLoading = true;
       getGames()
@@ -42,10 +54,10 @@ export default defineComponent({
         });
     },
     createNewGame() {
-      createNewGame(7,7,4).then(game =>{
-        console.log(game)
-        this.refreshGames()
-      })
+      createNewGame(7, 7, 4).then((game) => {
+        console.log(game);
+        this.refreshGames();
+      });
     }
   }
 });

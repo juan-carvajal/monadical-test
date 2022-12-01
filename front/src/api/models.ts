@@ -6,3 +6,17 @@ export interface Game {
   host?: string
   enemy?: string
 }
+
+
+export type GameStreamDataBoardRow = (string | null)[];
+
+export interface GameStreamData {
+  board: GameStreamDataBoardRow[];
+  winner?: string;
+  turn?: string;
+}
+
+export interface PlayerMove {
+  row: number
+  direction: 'right' | 'left'
+}

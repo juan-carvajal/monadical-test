@@ -88,6 +88,12 @@ class GameManager:
             self.active_connections[game_id].turn = next_turn
             return next_turn
 
+    async def get_turn(self, game_id: int):
+        async with self.lock:
+            if(game_id not in self.active_connections):
+                return None
+            return self.active_connections[game_id].turn
+
     async def add_enemy_to_game(self, player_id: str, game_id: int):
         async with self.lock:
             if(game_id in self.active_connections and self.active_connections[game_id].host != player_id and self.active_connections[game_id].enemy is None):
@@ -101,8 +107,6 @@ class GameManager:
             if(game_id not in self.active_connections):
                 return
             self.active_connections[game_id].remove_listener(player_id, ws)
-            if(len(self.active_connections[game_id].websockets) == 0):
-                self.active_connections.pop(game_id)
 
     async def broadcast_game_update(self, message: dict, game_id: int):
         async with self.lock:
@@ -113,11 +117,13 @@ class GameManager:
 
 manager = GameManager()
 
-def map_move(db:Session, game_id: int, move: PlayerMove) -> dict:
+
+def map_move(db: Session, game_id: int, move: PlayerMove) -> dict:
     stmt = text(get_raw_sql_query('get_all_valid_moves.sql'))
-    res = db.execute(stmt,{"game_id":game_id, "row":move.row,"direction":move.direction})
+    res = db.execute(
+        stmt, {"game_id": game_id, "row": move.row, "direction": move.direction})
     for row, in res:
-      return row
+        return row
     return {}
 
 
@@ -129,6 +135,25 @@ def get_all_tiles(db: Session, game_id: int):
     return db.query(GameTile).filter(GameTile.game_id == game_id).all()
 
 
+def get_current_board(db: Session, game_id: int):
+    game = get_game(db, game_id)
+    if (game is None):
+        raise GameNotFound(game_id)
+    tiles = [[None]*(game.height) for _ in range(game.width)]  # type: ignore
+    for tile in game.tiles:
+        tiles[tile.x][tile.y] = tile.value
+    return tiles, game
+
+
+async def get_current_game_status(db: Session, game_id: int):
+    tiles, game = get_current_board(db, game_id)
+    return {
+        "board": tiles,
+        "winner": game.winner,
+        "turn": await manager.get_turn(game_id)
+    }
+
+
 def check_win(db: Session, last_play: GTSchema):
     game = get_game(db, last_play.game_id)
     if (game is None):
@@ -136,7 +161,7 @@ def check_win(db: Session, last_play: GTSchema):
     tiles = [[None]*(game.height) for _ in range(game.width)]  # type: ignore
     for tile in game.tiles:
         tiles[tile.x][tile.y] = tile.value
-    return tiles, check_grid(tiles, game.line_target, last_play.value, last_play.x, last_play.y)  # type: ignore
+    return tiles, check_grid(tiles, game.line_target, last_play.value, last_play.x, last_play.y) # type: ignore
 
 # play_move checks if the current move wins the game
 # first elem in tuple is true if the player wins with the current move, the second indicates if the passed move was applied
@@ -144,21 +169,27 @@ def check_win(db: Session, last_play: GTSchema):
 
 def play_move(db: Session, value: PlayerMove, game_id: int, player_id: str):
     try:
-        all_moves = map_move(db,game_id,value)
+        all_moves = map_move(db, game_id, value)
         mapped_move = all_moves.get("mapped_move")
         if(mapped_move is None):
-          raise MoveIntegrityException(value)
+            raise MoveIntegrityException(value)
         game = all_moves.get("game")
         if(game is None):
-          raise GameNotFound(game_id)
-        gt = GTSchema(game_id=game_id,game_height=game["height"],game_width=game["width"],x=mapped_move["x"],y=mapped_move["y"],value=player_id)
+            raise GameNotFound(game_id)
+        gt = GTSchema(game_id=game_id, game_height=game["height"], game_width=game["width"],
+                      x=mapped_move["x"], y=mapped_move["y"], value=player_id)
         stmt = insert(GameTile).values(
             [gt.dict()]).on_conflict_do_nothing().returning(GameTile)
         result = db.execute(stmt)
         if (result.first() is None):
             raise MoveIntegrityException(value)
-        db.commit()
+
         board, (wins, _) = check_win(db, gt)
+        if(wins):
+            db.query(Game).filter(Game.game_id == game_id).update(
+                {'winner': player_id})
+
+        db.commit()
         return {
             "board": board,
             "winner": None if not wins else gt.value
@@ -168,9 +199,11 @@ def play_move(db: Session, value: PlayerMove, game_id: int, player_id: str):
         raise e
 
 
-def get_free_games(db: Session):
-    print("aqui")
-    return db.query(Game).filter(Game.enemy == None).all()
+def get_free_games(db: Session, player_id: str):
+    games = db.query(Game).filter((Game.enemy == None) | (
+        Game.host == player_id) | (Game.enemy == player_id)).all()
+    db.close()
+    return list(filter(lambda x: x.game_id in manager.active_connections.keys(), games))
 
 
 def create_game(db: Session, game_schema: GameSchema):
