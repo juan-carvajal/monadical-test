@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from db.engine import SessionLocal
 from services.game.exceptions import MoveIntegrityException
-from services.game.schemas import GameTile, Game
-from services.game.service import create_game, get_free_games, play_move, register_for_game, manager
+from services.game.schemas import GameTile, Game, PlayerMove
+from services.game.service import create_game, get_free_games, play_move, register_for_game, manager, map_move
 from fastapi import (
     Depends,
     FastAPI,
@@ -16,10 +16,23 @@ from fastapi import (
     WebSocketException,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI()
 
+
+origins = [
+    "http://localhost:9000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def get_db():
     db = SessionLocal()
@@ -44,7 +57,6 @@ class ConnectionManager:
         await websocket.send_text(message)
 
     async def broadcast(self, message: str):
-        print(len(self.active_connections))
         for connection in self.active_connections:
             await connection.send_text(message)
 
@@ -73,11 +85,6 @@ async def unicorn_exception_handler(request: Request, exc: MoveIntegrityExceptio
     )
 
 
-@app.get("/test")
-async def get_test(move: GameTile, db: Session = Depends(get_db)):
-    return play_move(db, move)
-
-
 @app.post("/games")
 async def post_game(game: Game, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
     game.host = token
@@ -104,21 +111,24 @@ async def join_game(game_id: int, db: Session = Depends(get_db), token: str = De
 
 
 @app.post("/games/{game_id}/moves")
-async def move_game(move: GameTile, game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
-    move.value = token
-    move.game_id = game_id
+async def move_game(move: PlayerMove, game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
     if(not manager.can_move(token, game_id)):
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"message": f"Is not {token}'s turn"},
         )
-    res = play_move(db, move)
+    res = play_move(db, move,game_id,token)
     if(res is None):
         return None
     turn = await manager.set_turn(game_id)
     res["turn"] = turn
     await manager.broadcast_game_update(res, game_id)
     return res
+
+
+@app.get("/games/{game_id}/valid-moves")
+def get_valid_moves_handler(game_id: int,move: PlayerMove, db: Session = Depends(get_db)):
+    return map_move(db,game_id,move)
 
 
 @app.websocket("/ws/{game_id}")

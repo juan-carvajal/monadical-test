@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from enum import Enum
 
 
 class GameTile(BaseModel):
@@ -19,8 +20,23 @@ class Game(BaseModel):
     height: int
     line_target: int
     tiles: list[GameTile] | None
-    host: str  | None
+    host: str | None
     enemy: str | None
 
     class Config:
         orm_mode = True
+
+
+class Coordinate(BaseModel):
+    x: int
+    y: int
+
+
+class PlayDirectionEnum(str, Enum):
+    left = 'left'
+    right = 'right'
+
+
+class PlayerMove(BaseModel):
+    row: int
+    direction: PlayDirectionEnum

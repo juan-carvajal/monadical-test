@@ -1,8 +1,7 @@
-from services.game.schemas import GameTile
-
+from services.game.schemas import PlayerMove
 
 class MoveIntegrityException(Exception):
-    def __init__(self, move : GameTile):
+    def __init__(self, move : PlayerMove):
         self.move = move
         self.message = f"Provide move broke game integrity rules"
         super().__init__(self.message)

@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from services.game.exceptions import GameFullException, GameNotFound, MoveIntegrityException
 
 from services.game.models import Game, GameTile
-from services.game.schemas import GameTile as GTSchema, Game as GameSchema
+from services.game.schemas import GameTile as GTSchema, Game as GameSchema, PlayerMove
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import update
@@ -11,6 +11,8 @@ from services.game.utils import check_grid
 import json
 from fastapi import WebSocket
 import asyncio
+from sqlalchemy.sql import text
+from db.utils import get_raw_sql_query
 
 
 class GameContext():
@@ -111,6 +113,13 @@ class GameManager:
 
 manager = GameManager()
 
+def map_move(db:Session, game_id: int, move: PlayerMove) -> dict:
+    stmt = text(get_raw_sql_query('get_all_valid_moves.sql'))
+    res = db.execute(stmt,{"game_id":game_id, "row":move.row,"direction":move.direction})
+    for row, in res:
+      return row
+    return {}
+
 
 def get_game(db: Session, game_id: int):
     return db.query(Game).filter(Game.game_id == game_id).first()
@@ -133,27 +142,35 @@ def check_win(db: Session, last_play: GTSchema):
 # first elem in tuple is true if the player wins with the current move, the second indicates if the passed move was applied
 
 
-def play_move(db: Session, value: GTSchema):
+def play_move(db: Session, value: PlayerMove, game_id: int, player_id: str):
     try:
+        all_moves = map_move(db,game_id,value)
+        mapped_move = all_moves.get("mapped_move")
+        if(mapped_move is None):
+          raise MoveIntegrityException(value)
+        game = all_moves.get("game")
+        if(game is None):
+          raise GameNotFound(game_id)
+        gt = GTSchema(game_id=game_id,game_height=game["height"],game_width=game["width"],x=mapped_move["x"],y=mapped_move["y"],value=player_id)
         stmt = insert(GameTile).values(
-            [value.dict()]).on_conflict_do_nothing().returning(GameTile)
+            [gt.dict()]).on_conflict_do_nothing().returning(GameTile)
         result = db.execute(stmt)
-        r = result.first()
-        if (r is None):
-            # This means there was no update. The move was a duplicate
-            return None
+        if (result.first() is None):
+            raise MoveIntegrityException(value)
         db.commit()
-        board, (wins, _) = check_win(db, value)
+        board, (wins, _) = check_win(db, gt)
         return {
             "board": board,
-            "winner": None if not wins else value.value
+            "winner": None if not wins else gt.value
         }
-    except IntegrityError:
-        raise MoveIntegrityException(value)
+    except Exception as e:
+        db.rollback()
+        raise e
 
 
 def get_free_games(db: Session):
-    return db.query(Game).filter(Game.enemy is None).all()
+    print("aqui")
+    return db.query(Game).filter(Game.enemy == None).all()
 
 
 def create_game(db: Session, game_schema: GameSchema):
