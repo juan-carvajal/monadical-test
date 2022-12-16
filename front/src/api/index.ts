@@ -64,3 +64,34 @@ export const createNewGame = (width: number, height: number, line_target: number
     return resp.data as Game
   })
 }
+
+
+export const turnGameIntoAI = (game_id: number) => {
+  return axios.post(`${BACKEND_PATH}/games/${game_id}/ai`, {}, {
+    params: {
+      token: getSessionToken()
+    }
+  }).then(resp => {
+    return resp.data as Game
+  })
+}
+
+
+export const createAINewGame = (width: number, height: number, line_target: number) => {
+  return axios.post(`${BACKEND_PATH}/games`, {
+    width,
+    height,
+    line_target
+  }, {
+    params: {
+      token: getSessionToken()
+    }
+  }).then(resp => {
+    return resp.data as Game
+  }).then(game => {
+    if (!game.game_id) {
+      throw new Error('Game has no id')
+    }
+    return turnGameIntoAI(game.game_id)
+  })
+}

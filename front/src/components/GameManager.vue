@@ -1,12 +1,17 @@
 <template>
-  <div class="fixed-top z-top bg-white">
-    <q-btn-group spread outline class="q-ma-xs">
-      <q-btn label="New game" color="primary" @click="createNewGame" />
-      <q-btn icon="update" color="primary" @click="refreshGames()" />
-    </q-btn-group>
-  </div>
-
-  <q-list bordered separator Style="padding-top:44px">
+  <q-list bordered separator Style="">
+    <div class="z-top bg-white">
+      <q-btn-group spread outline class="q-ma-xs">
+        <q-btn dense label="New game" color="primary" @click="createNewGame" />
+        <q-btn
+          dense
+          label="New AI game"
+          color="primary"
+          @click="createAINewGameHandler"
+        />
+        <q-btn dense icon="update" color="primary" @click="refreshGames()" />
+      </q-btn-group>
+    </div>
     <q-item
       clickable
       v-ripple
@@ -21,23 +26,35 @@
         }}</q-item-label>
       </q-item-section>
     </q-item>
-    <q-inner-loading :showing="gamesLoading"></q-inner-loading>
   </q-list>
 </template>
 
 <script lang="ts">
 import { defineComponent } from 'vue';
-import { getGames, createNewGame } from 'src/api';
+import { getGames, createNewGame, createAINewGame } from 'src/api';
 import { Game } from 'src/api/models';
+
+const REFRESH_INTERVAL_IN_MS = 2500;
 export default defineComponent({
   data() {
     return {
       games: [] as Game[],
-      gamesLoading: true
+      gamesLoading: true,
+      refreshInterval: null as NodeJS.Timeout | null
     };
   },
   mounted() {
-    this.refreshGames();
+    this.refreshInterval = setInterval(
+      this.refreshGames,
+      REFRESH_INTERVAL_IN_MS
+    );
+  },
+  unmounted() {
+    if (!this.refreshInterval) {
+      return;
+    }
+
+    clearInterval(this.refreshInterval);
   },
   methods: {
     goToGame(id?: number) {
@@ -55,6 +72,12 @@ export default defineComponent({
     },
     createNewGame() {
       createNewGame(7, 7, 4).then((game) => {
+        console.log(game);
+        this.refreshGames();
+      });
+    },
+    createAINewGameHandler() {
+      createAINewGame(7, 7, 4).then((game) => {
         console.log(game);
         this.refreshGames();
       });

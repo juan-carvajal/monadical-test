@@ -2,17 +2,20 @@ from sqlalchemy.orm import Session
 from services.game.exceptions import GameFullException, GameNotFound, MoveIntegrityException
 
 from services.game.models import Game, GameTile
-from services.game.schemas import GameTile as GTSchema, Game as GameSchema, PlayerMove
+from services.game.schemas import GameTile as GTSchema, Game as GameSchema, PlayerMove, PlayDirectionEnum, WSEvent
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import update
 
 from services.game.utils import check_grid
 import json
-from fastapi import WebSocket
+from fastapi import WebSocket, status
 import asyncio
 from sqlalchemy.sql import text
 from db.utils import get_raw_sql_query
+import time
+import random
+from fastapi.responses import JSONResponse
 
 
 class GameContext():
@@ -44,6 +47,30 @@ class GameManager:
     def __init__(self):
         self.lock = asyncio.Lock()
         self.active_connections: dict[int, GameContext] = {}
+        self.agents: dict[int, str] = {}
+
+    async def register_new_ai_agent(self, game_id: int, player_id: str):
+        async with self.lock:
+            if(game_id in self.agents):
+                return
+
+            self.agents[game_id] = player_id
+
+    async def move_ai(self, db: Session, game_id: int):
+        async with self.lock:
+            if(game_id not in self.agents):
+                return None
+            ai_id = self.agents[game_id]
+            next_move = get_ai_move(db, game_id)
+            move = random.choice(next_move)
+            if(not self.can_move(ai_id, game_id)):
+                raise Exception("TODO")
+            res = play_move(db, move, game_id, ai_id)
+            if(res is None):
+                return None
+            turn = self.__set_next_turn(game_id)
+            res["turn"]=turn
+            return res
 
     async def register_game(self, game_id: int, host: str):
         async with self.lock:
@@ -78,15 +105,18 @@ class GameManager:
 
     async def set_turn(self, game_id: int):
         async with self.lock:
-            if(game_id not in self.active_connections):
-                return None
+            return self.__set_next_turn(game_id)
 
-            next_turn = self.get_next_turn(game_id)
-            if (next_turn is None):
-                return None
+    def __set_next_turn(self, game_id: int):
+        if(game_id not in self.active_connections):
+            return None
 
-            self.active_connections[game_id].turn = next_turn
-            return next_turn
+        next_turn = self.get_next_turn(game_id)
+        if (next_turn is None):
+            return None
+
+        self.active_connections[game_id].turn = next_turn
+        return next_turn
 
     async def get_turn(self, game_id: int):
         async with self.lock:
@@ -110,9 +140,12 @@ class GameManager:
 
     async def broadcast_game_update(self, message: dict, game_id: int):
         async with self.lock:
-            if(game_id not in self.active_connections):
-                return
-            await self.active_connections[game_id].broadcast_message(message)
+            await self.__broadcast_game_update(message, game_id)
+
+    async def __broadcast_game_update(self, message: dict, game_id: int):
+        if(game_id not in self.active_connections):
+            return
+        await self.active_connections[game_id].broadcast_message(message)
 
 
 manager = GameManager()
@@ -125,6 +158,21 @@ def map_move(db: Session, game_id: int, move: PlayerMove) -> dict:
     for row, in res:
         return row
     return {}
+
+
+def get_ai_move(db: Session, game_id: int) -> list[PlayerMove]:
+    tiles, _ = get_current_board(db, game_id)
+    valid_moves = []
+    for rownum, row in enumerate(tiles):
+        if(row[0] is None):
+            valid_moves.append(PlayerMove(
+                row=rownum, direction=PlayDirectionEnum.left))
+
+        if(row[-1] is None):
+            valid_moves.append(PlayerMove(
+                row=rownum, direction=PlayDirectionEnum.right))
+
+    return valid_moves
 
 
 def get_game(db: Session, game_id: int):
@@ -165,8 +213,6 @@ def check_win(db: Session, last_play: GTSchema):
 
 # play_move checks if the current move wins the game
 # first elem in tuple is true if the player wins with the current move, the second indicates if the passed move was applied
-
-
 def play_move(db: Session, value: PlayerMove, game_id: int, player_id: str):
     try:
         all_moves = map_move(db, game_id, value)
@@ -206,6 +252,30 @@ def get_free_games(db: Session, player_id: str):
     return list(filter(lambda x: x.game_id in manager.active_connections.keys(), games))
 
 
+async def turn_game_into_ai(db: Session, game_id: int, player_id: str):
+    game = get_game(db, game_id)
+    if(game is None):
+        raise Exception("TODO")
+    if(game.host != player_id):
+        raise Exception("TODO")
+    if(game.enemy is not None):
+        raise Exception("TODO")
+
+    bot_user_name = f"bot_{int(time.time())}"
+
+    row = register_for_game(db, game_id, bot_user_name)
+    if(row is None):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"message": f"Could not join game"},
+        )
+    await manager.add_enemy_to_game(bot_user_name, game_id)
+    event = WSEvent(type="opponent", payload={"username": bot_user_name})
+    await manager.broadcast_game_update(event.dict(), game_id)
+    await manager.register_new_ai_agent(game_id, bot_user_name)
+    return row
+
+
 def create_game(db: Session, game_schema: GameSchema):
     db_game = Game(host=game_schema.host, width=game_schema.width,
                    height=game_schema.height, line_target=game_schema.line_target)
@@ -215,7 +285,7 @@ def create_game(db: Session, game_schema: GameSchema):
     return db_game
 
 
-def register_for_game(db: Session, game_id: int, player_id: str):
+def register_for_game(db: Session, game_id: int, player_id: str) -> Game:
     game = get_game(db, game_id)
     if (game is None):
         raise GameNotFound(game_id)

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from db.engine import SessionLocal
 from services.game.exceptions import MoveIntegrityException
 from services.game.schemas import GameTile, Game, PlayerMove, WSEvent
-from services.game.service import create_game, get_current_game_status, get_free_games, get_game, play_move, register_for_game, manager, map_move
+from services.game.service import create_game, get_current_game_status, get_free_games, get_game, play_move, register_for_game, manager, map_move, turn_game_into_ai
 from fastapi import (
     Depends,
     FastAPI,
@@ -104,6 +104,10 @@ async def get_games(db: Session = Depends(get_db), token: str = Depends(get_toke
 async def get_game_handler(game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
     return get_game(db, game_id)
 
+@app.post("/games/{game_id}/ai")
+async def post_turn_game_ai(game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
+    return await turn_game_into_ai(db,game_id,token)  
+
 
 @app.post("/games/{game_id}/membership")
 async def join_game(game_id: int, db: Session = Depends(get_db), token: str = Depends(get_token_http)):
@@ -130,7 +134,11 @@ async def move_game(move: PlayerMove, game_id: int, db: Session = Depends(get_db
     if(res is None):
         return None
     turn = await manager.set_turn(game_id)
-    res["turn"] = turn
+    new_res = await manager.move_ai(db,game_id)
+    if(new_res is not None):
+      res = new_res
+    else:
+      res["turn"] = turn
     event = WSEvent(type="game", payload=res)
     await manager.broadcast_game_update(event.dict(), game_id)
     return res
