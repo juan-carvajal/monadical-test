@@ -6,7 +6,7 @@
         <td>
           <div class="content">
             <q-btn
-              :disable="!canMove || !!row.at(0)"
+              :disable="!canMove || isRowFull(row)"
               outline
               @click="makeMoveHandler(i, 'left')"
               class="fit"
@@ -34,7 +34,7 @@
         <td>
           <div class="content">
             <q-btn
-              :disable="!canMove || !!row.at(-1)"
+              :disable="!canMove || isRowFull(row)"
               outline
               @click="makeMoveHandler(i, 'right')"
               class="fit"
@@ -114,6 +114,9 @@ export default defineComponent({
     }
   },
   methods: {
+    isRowFull(row: (string|null)[]){
+      return row.every(i => !!i)
+    },
     makeMoveHandler(row: number, direction: 'right' | 'left') {
       const move: PlayerMove = {
         row: row,

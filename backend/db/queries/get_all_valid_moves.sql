@@ -21,7 +21,7 @@ tiles AS (
 ), 
 all_rows AS (
   SELECT 
-    generate_series AS num 
+    generate_series AS row 
   FROM 
     generate_series(
       0, 
@@ -32,43 +32,48 @@ all_rows AS (
           gamec
       ) -1
     )
-), 
+),
+all_cols AS (
+  SELECT 
+    generate_series AS col 
+  FROM 
+    generate_series(
+      0, 
+      (
+        SELECT 
+          width 
+        FROM 
+          gamec
+      ) -1
+    )
+),
+available_moves AS(
+  SELECT row as x,col as y from all_rows r cross join all_cols c 
+    full JOIN tiles t ON r.row = t.x and c.col = t.y where value is null
+),
 left_moves AS (
   SELECT 
-    r.num AS x, 
+    r.row AS x, 
     'left' as type, 
-    CASE WHEN (
-      MIN(t.y) -1
-    ) IS NULL THEN (
-      SELECT 
-        width 
-      FROM 
-        gamec
-    ) -1 ELSE (
-      MIN(t.y) -1
-    ) END y 
+    MAX(m.y) y 
   FROM 
     all_rows r FULL 
-    JOIN tiles t ON r.num = t.x 
+    JOIN available_moves m ON r.row = m.x 
   GROUP BY 
-    t.x, 
-    num
+    m.x, 
+    row
 ), 
 right_moves AS (
   SELECT 
-    r.num AS x, 
+    r.row AS x, 
     'right' as type, 
-    CASE WHEN (
-      MAX(t.y) + 1
-    ) IS NULL THEN 0 ELSE (
-      MAX(t.y) + 1
-    ) END y 
+    MIN(m.y) y 
   FROM 
     all_rows r FULL 
-    JOIN tiles t ON r.num = t.x 
+    JOIN available_moves m ON r.row = m.x 
   GROUP BY 
-    t.x, 
-    num
+    m.x, 
+    row
 ), 
 all_moves AS (
   SELECT 
@@ -97,7 +102,7 @@ mapped_move as(
     all_moves 
   where 
     type = :direction 
-    and x = :row 
+    and x = :row
   limit 
     1
 ),

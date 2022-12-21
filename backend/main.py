@@ -136,7 +136,9 @@ async def move_game(move: PlayerMove, game_id: int, db: Session = Depends(get_db
     turn = await manager.set_turn(game_id)
     new_res = await manager.move_ai(db,game_id)
     if(new_res is not None):
+      player_wins = res["winner"]
       res = new_res
+      res["winner"]=player_wins
     else:
       res["turn"] = turn
     event = WSEvent(type="game", payload=res)
